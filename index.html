@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Rialo RRR</title>
+<style>
+  body { margin:0; overflow:hidden; background:black; }
+  canvas { display:block; margin:0 auto; background:#000; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const WIDTH = canvas.width;
+const HEIGHT = canvas.height;
+
+// Colors
+const WHITE = '#ffffff';
+const BLUE = '#0000ff';
+const RED = '#ff3232';
+const PURPLE = '#800080';
+const YELLOW = '#ffff00';
+const GREEN = '#00ff00';
+const ORANGE = '#ffa500';
+const CYAN = '#00ffff';
+
+// Input
+const keys = {};
+document.addEventListener('keydown', e => keys[e.code] = true);
+document.addEventListener('keyup', e => keys[e.code] = false);
+
+// Game state
+let gameState = 'start'; // start, playing, level_complete, game_over
+let currentLevel = 0;
+let score = 0;
+
+// Player
+const player = {
+    x:50, y:550, width:40, height:40,
+    speed:5, jumpPower:-18, gravity:0.8, velocityY:0,
+    jumpCount:0, maxJumps:2, isJumping:false,
+    invincible:0
+};
+// Load player logo
+const playerLogo = new Image();
+playerLogo.src = 'logo.png';
+
+// Levels
+const levelData = [
+    {
+        background: 'bg1.png',
+        platforms:[
+            {x:0,y:560,width:800,height:40},
+            {x:300,y:450,width:80,height:20},
+            {x:500,y:400,width:80,height:20},
+        ],
+        movingPlatforms:[
+            {x:200,y:350,width:60,height:20,speed:3,dir:'horizontal',range:[200,400]},
+        ],
+        spikes:[
+            {x:600,y:540,width:30,height:20},
+            {x:400,y:500,width:30,height:20,speed:2,dir:'horizontal',range:[350,450]},
+        ],
+        fallingBlocks:[
+            {x:250,y:0,width:40,height:40,speed:4,active:false},
+        ],
+        coins:[
+            {x:320,y:410,width:20,height:20},
+            {x:550,y:360,width:20,height:20},
+        ],
+    },
+    {
+        background: 'bg2.png',
+        platforms:[
+            {x:0,y:560,width:800,height:40},
+            {x:150,y:450,width:60,height:20},
+            {x:400,y:350,width:80,height:20},
+        ],
+        movingPlatforms:[
+            {x:300,y:300,width:50,height:20,speed:4,dir:'vertical',range:[200,400]},
+            {x:500,y:400,width:60,height:20,speed:3,dir:'horizontal',range:[400,600]},
+        ],
+        spikes:[
+            {x:200,y:540,width:30,height:20,speed:3,dir:'horizontal',range:[150,250]},
+            {x:650,y:540,width:30,height:20},
+        ],
+        fallingBlocks:[
+            {x:350,y:0,width:40,height:40,speed:5,active:false},
+            {x:500,y:0,width:40,height:40,speed:4,active:false},
+        ],
+        coins:[
+            {x:160,y:410,width:20,height:20},
+            {x:420,y:310,width:20,height:20},
+            {x:600,y:260,width:20,height:20},
+        ],
+    },
+    {
+        background: 'bg3.png',
+        platforms:[
+            {x:0,y:560,width:800,height:40},
+            {x:100,y:500,width:60,height:20},
+            {x:300,y:400,width:80,height:20},
+            {x:600,y:350,width:60,height:20},
+        ],
+        movingPlatforms:[
+            {x:200,y:350,width:60,height:20,speed:5,dir:'horizontal',range:[100,400]},
+        ],
+        spikes:[
+            {x:150,y:540,width:30,height:20,speed:3,dir:'horizontal',range:[100,250]},
+            {x:400,y:540,width:30,height:20,speed:4,dir:'horizontal',range:[350,450]},
+            {x:650,y:540,width:30,height:20},
+        ],
+        fallingBlocks:[
+            {x:200,y:0,width:40,height:40,speed:6,active:false},
+            {x:500,y:0,width:40,height:40,speed:5,active:false},
+        ],
+        coins:[
+            {x:120,y:460,width:20,height:20},
+            {x:350,y:360,width:20,height:20},
+            {x:600,y:300,width:20,height:20},
+        ],
+    }
+];
+const playerImg = new Image();
+playerImg.src = 'logo.png'; // Put your logo file in the same folder
+
+// Load backgrounds
+const backgrounds = [];
+for(let i=0;i<levelData.length;i++){
+    const img=new Image();
+    img.src=levelData[i].background;
+    backgrounds.push(img);
+}
+
+// Utilities
+function rectsCollide(a,b){
+    return !(a.x+a.width<b.x || a.x>b.x+b.width || a.y+a.height<b.y || a.y>b.y+b.height);
+}
+
+function drawPlayer() {
+    ctx.drawImage(playerImg, player.x, player.y, player.width, player.height);
+}
+
+
+// Draw rectangles
+function drawRect(obj,color){ ctx.fillStyle=color; ctx.fillRect(obj.x,obj.y,obj.width,obj.height); }
+// Draw circles
+function drawCircle(obj,color){ ctx.fillStyle=color; ctx.beginPath(); ctx.arc(obj.x+obj.width/2,obj.y+obj.height/2,obj.width/2,0,Math.PI*2); ctx.fill(); }
+
+// Reset player position
+function resetPlayer(){
+    player.x=50;
+    player.y=550;
+    player.velocityY=0;
+    player.jumpCount=0;
+    player.isJumping=false;
+    player.invincible=60;
+}
+
+// Game loop
+function update(){
+    if(gameState==='start'){
+        drawStart();
+        if(keys['Enter']) gameState='playing';
+        requestAnimationFrame(update);
+        return;
+    }
+    if(gameState==='level_complete'){
+        drawLevelComplete();
+        if(keys['Enter']){
+            currentLevel++;
+            if(currentLevel>=levelData.length){
+                gameState='game_over';
+            }else{
+                resetPlayer();
+                gameState='playing';
+            }
+        }
+        requestAnimationFrame(update);
+        return;
+    }
+    if(gameState==='game_over'){
+        drawGameOver();
+        requestAnimationFrame(update);
+        return;
+    }
+
+    const level = levelData[currentLevel];
+
+    // Player movement
+    if(keys['ArrowLeft'] && player.x>0) player.x -= player.speed;
+    if(keys['ArrowRight'] && player.x<WIDTH-player.width) player.x += player.speed;
+    if(keys['Space'] && player.jumpCount<player.maxJumps && !player.isJumping){
+        player.velocityY = player.jumpPower;
+        player.jumpCount++;
+        player.isJumping = true;
+    }
+
+    // Gravity
+    player.velocityY += player.gravity;
+    player.y += player.velocityY;
+
+    // Platform collision
+    let onGround=false;
+    for(let plat of level.platforms.concat(level.movingPlatforms)){
+        if(rectsCollide(player,plat) && player.velocityY>0){
+            player.y=plat.y-player.height;
+            player.velocityY=0;
+            player.jumpCount=0;
+            player.isJumping=false;
+            onGround=true;
+        }
+    }
+    if(!onGround && player.y>=HEIGHT-player.height){
+        player.y=HEIGHT-player.height;
+        player.velocityY=0;
+        player.jumpCount=0;
+        player.isJumping=false;
+    }
+
+    // Moving platforms
+    for(let mp of level.movingPlatforms){
+        if(mp.dir==='horizontal'){
+            mp.x+=mp.speed;
+            if(mp.x<mp.range[0] || mp.x>mp.range[1]) mp.speed*=-1;
+        }else{
+            mp.y+=mp.speed;
+            if(mp.y<mp.range[0] || mp.y>mp.range[1]) mp.speed*=-1;
+        }
+    }
+
+    // Falling blocks
+    for(let fb of level.fallingBlocks){
+        if(!fb.active && Math.random()<0.02) fb.active=true;
+        if(fb.active){
+            fb.y+=fb.speed;
+            if(fb.y>HEIGHT) fb.y=0;
+        }
+    }
+
+    // Check hazards (spikes, falling blocks)
+    for(let hazard of level.spikes.concat(level.fallingBlocks)){
+        if(rectsCollide(player,hazard) && player.invincible===0){
+            resetPlayer();
+        }
+    }
+
+    if(player.invincible>0) player.invincible--;
+
+    // Coins
+    for(let i=level.coins.length-1;i>=0;i--){
+        const c=level.coins[i];
+        if(rectsCollide(player,c)){
+            level.coins.splice(i,1);
+            score++;
+        }
+    }
+
+    // Check level completion
+    if(player.x>=WIDTH-50){
+        gameState='level_complete';
+    }
+
+    draw();
+    requestAnimationFrame(update);
+}
+
+// Draw functions
+function draw(){
+    ctx.clearRect(0,0,WIDTH,HEIGHT);
+    // Background
+    const bg = backgrounds[currentLevel];
+    ctx.drawImage(bg,0,0,WIDTH,HEIGHT);
+    const level = levelData[currentLevel];
+    // Platforms
+    for(let plat of level.platforms) drawRect(plat,WHITE);
+    for(let mp of level.movingPlatforms) drawRect(mp,ORANGE);
+    // Hazards
+    for(let spike of level.spikes) drawRect(spike,RED);
+    for(let fb of level.fallingBlocks) drawRect(fb,PURPLE);
+    // Coins
+    for(let c of level.coins) drawCircle(c,YELLOW);
+    drawPlayer();
+    ctx.fillStyle=WHITE;
+    ctx.font='24px Arial';
+    ctx.fillText("Score: "+score,10,30);
+}
+
+function drawStart(){
+    ctx.clearRect(0,0,WIDTH,HEIGHT);
+    ctx.fillStyle=CYAN;
+    ctx.font='40px Arial';
+    ctx.fillText("R.R.R",320,200);
+    ctx.font='24px Arial';
+    ctx.fillText("Press ENTER to Start",270,300);
+}
+
+function drawLevelComplete(){
+    ctx.clearRect(0,0,WIDTH,HEIGHT);
+    ctx.fillStyle=GREEN;
+    ctx.font='40px Arial';
+    ctx.fillText("Level Complete!",220,200);
+     ctx.fillText("Press ENTER for Next Level",120,300);
+     ctx.font='24px Arial';
+}
+
+function drawGameOver(){
+    ctx.clearRect(0,0,WIDTH,HEIGHT);
+    ctx.fillStyle=RED;
+    ctx.font='40px Arial';
+    ctx.fillText("CONGRATULATIONS!",180,200);
+    ctx.font='24px Arial';
+    ctx.fillText("You completed all levels!",230,300);
+    ctx.fillText("Join Rialo: x.com/RialoHQ | Discord: discord.gg/RialoProtocol",80,400);
+}
+
+update();
+</script>
+</body>
+</html>
